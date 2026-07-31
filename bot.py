@@ -1,112 +1,83 @@
+import os
+import json
 import requests
 from bs4 import BeautifulSoup
-import time
-import urllib3
 
-# SSL Warning ಗಳನ್ನು ಆಫ್ ಮಾಡಲು
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Telegram Bot ವಿವರಗಳು
+# Telegram Bot Credentials
 BOT_TOKEN = "8776523393:AAFVI5NZQe82J6xEbbyUiVPq5qzzxFZtSxU"
-CHAT_ID = "8642714992"
+CHAT_ID = "@namma_kannada_news_2026_bot"  # ಅಥವಾ ನಿಮ್ಮ Telegram Channel/Group/Chat ID
+
+SEEN_JOBS_FILE = "seen_jobs.json"
+
+# ನೀವು ಸ್ಕ್ರೇಪ್ ಮಾಡುತ್ತಿರುವ ವೆಬ್‌ಸೈಟ್‌ಗಳ ಪಟ್ಟಿ
+WEBSITES = [
+    {
+        "name": "IBPS (ಬ್ಯಾಂಕಿಂಗ್ ನೇಮಕಾತಿ)",
+        "url": "https://www.ibps.in/"
+    },
+    # ನಿಮ್ಮ ಹಳೆಯ bot.py ನಲ್ಲಿದ್ದ ಇನ್ನುಳಿದ ವೆಬ್‌ಸೈಟ್‌ಗಳ ವಿವರಗಳನ್ನು ಇಲ್ಲಿ ಸೇರಿಸಿಕೊಳ್ಳಬಹುದು
+]
+
+def load_seen_jobs():
+    """ಈಗಾಗಲೇ ಕಳುಹಿಸಿದ ಜಾಬ್‌ಗಳ ಐಡಿ/ಲಿಂಕ್ ಲೋಡ್ ಮಾಡಲು"""
+    if os.path.exists(SEEN_JOBS_FILE):
+        try:
+            with open(SEEN_JOBS_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+def save_seen_jobs(seen_jobs):
+    """ಕಳುಹಿಸಿದ ಜಾಬ್‌ಗಳನ್ನು ಫೈಲ್‌ನಲ್ಲಿ ಸೇವ್ ಮಾಡಲು"""
+    with open(SEEN_JOBS_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(seen_jobs), f, ensure_ascii=False, indent=2)
 
 def send_telegram_message(message):
+    """Telegram ಗೆ ಮೆಸೇಜ್ ಕಳುಹಿಸಲು"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
-        "text": message
+        "text": message,
+        "parse_mode": "HTML"
     }
     try:
-        requests.post(url, data=payload, verify=False, timeout=10)
+        requests.post(url, data=payload)
     except Exception as e:
-        print("Telegram Send Error:", e)
+        print(f"Error sending message: {e}")
 
-# ಸರ್ಕಾರಿ ವೆಬ್‌ಸೈಟ್‌ಗಳ ಲಿಸ್ಟ್ (100% ಸರಿಯಾದ URL ಗಳೊಂದಿಗೆ)
-GOVT_WEBSITES = [
-    {
-        "name": "KEA (ಕರ್ನಾಟಕ ಪರೀಕ್ಷಾ ಪ್ರಾಧಿಕಾರ)",
-        "url": "https://cetonline.karnataka.gov.in/kea/",
-        "base_url": "https://cetonline.karnataka.gov.in/kea/"
-    },
-    {
-        "name": "KPSC (ಕರ್ನಾಟಕ ಲೋಕಸೇವಾ ಆಯೋಗ)",
-        "url": "https://kpsc.karnataka.gov.in/notifications/kn",
-        "base_url": "https://kpsc.karnataka.gov.in"
-    },
-    {
-        "name": "India Post GDS (ಅಂಚೆ ಇಲಾಖೆ ಜಿಡಿಎಸ್)",
-        "url": "https://indiapostgdsonline.gov.in/",
-        "base_url": "https://indiapostgdsonline.gov.in/"
-    },
-    {
-        "name": "KSP (ಕರ್ನಾಟಕ ರಾಜ್ಯ ಪೊಲೀಸ್ ನೇಮಕಾತಿ)",
-        "url": "https://ksp-recruitment.in/",
-        "base_url": "https://ksp-recruitment.in/"
-    },
-    {
-        "name": "SSC (ಕೇಂದ್ರ ಸಿಬ್ಬಂದಿ ನೇಮಕಾತಿ ಆಯೋಗ)",
-        "url": "https://ssc.gov.in/",
-        "base_url": "https://ssc.gov.in/"
-    },
-    {
-        "name": "IBPS (ಬ್ಯಾಂಕಿಂಗ್ ನೇಮಕಾತಿ)",
-        "url": "https://www.ibps.in/",
-        "base_url": "https://www.ibps.in/"
-    }
-]
+def fetch_and_send_jobs():
+    seen_jobs = load_seen_jobs()
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-seen_links = set()
-
-def check_all_govt_websites():
-    print("\n🔄 ಎಲ್ಲಾ ಆಫೀಶಿಯಲ್ ವೆಬ್‌ಸೈಟ್‌ಗಳನ್ನು ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...")
-    
-    # Real Browser Header
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-    })
-
-    for site in GOVT_WEBSITES:
+    for site in WEBSITES:
         try:
-            # 20 ಸೆಕೆಂಡ್‌ಗಳ Time-out ಕೊಟ್ಟಿರುವುದರಿಂದ KPSC ಯಂತಹ ನಿಧಾನ ಸರ್ವರ್‌ಗಳೂ ರನ್ ಆಗುತ್ತವೆ
-            response = session.get(site["url"], timeout=20, verify=False)
+            response = requests.get(site["url"], headers=headers, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            found_count = 0
-            for link in soup.find_all('a', href=True):
-                text = link.text.strip()
-                href = link['href']
-                
-                # ಉದ್ಯೋಗಕ್ಕೆ ಸಂಬಂಧಿಸಿದ ಕೀವರ್ಡ್‌ಗಳು
-                keywords = ["recruitment", "notification", "ನೇಮಕಾತಿ", "gds", "kasp", "apply", "2026", "option entry", "post", "circular"]
-                
-                if any(kw in text.lower() for kw in keywords) and len(text) > 5:
-                    full_link = href if href.startswith("http") else site["base_url"] + href
+
+            # ವೆಬ್‌ಸೈಟ್‌ಗಳ ಲಿಂಕ್‌ಗಳನ್ನು ಹುಡುಕಿ
+            for a_tag in soup.find_all('a', href=True):
+                title = a_tag.text.strip()
+                link = a_tag['href']
+
+                if not link.startswith('http'):
+                    link = site["url"] + link
+
+                # ಲಿಂಕ್ ಆಧಾರಿತವಾಗಿ ಯುನಿಕ್ ಐಡಿ
+                unique_job_id = link
+
+                # ಲಿಂಕ್ ಖಾಲಿ ಇಲ್ಲದಿದ್ದರೆ ಮತ್ತು ಈ ಮೊದಲು ಕಳುಹಿಸಿರದಿದ್ದರೆ ಮಾತ್ರ
+                if len(title) > 5 and unique_job_id not in seen_jobs:
+                    message = f"🚨 <b>{site['name']} - ಹೊಸ ಉದ್ಯೋಗ ಮಾಹಿತಿ!</b> 🚨\n\n📌 <b>{title}</b>\n\n🔗 <a href='{link}'>ಇಲ್ಲಿ ಕ್ಲಿಕ್ ಮಾಡಿ ಅಪ್ಲೈ ಮಾಡಿ</a>"
                     
-                    if full_link not in seen_links:
-                        seen_links.add(full_link)
-                        found_count += 1
-                        
-                        msg = (
-                            f"🏛️ ಆಫೀಶಿಯಲ್ ಸರ್ಕಾರಿ ಅಲರ್ಟ್!\n"
-                            f"🏢 ಇಲಾಖೆ: {site['name']}\n\n"
-                            f"📌 ವಿವರ: {text}\n"
-                            f"🔗 ಲಿಂಕ್: {full_link}"
-                        )
-                        print(f"🟩 ಹೊಸ ನೋಟಿಫಿಕೇಶನ್ ಸಿಕ್ಕಿದೆ [{site['name']}]: {text[:35]}...")
-                        send_telegram_message(msg)
-                        
-            if found_count == 0:
-                print(f"✅ {site['name']} ಚೆಕ್ ಮಾಡಲಾಗಿದೆ.")
-                        
+                    send_telegram_message(message)
+                    seen_jobs.add(unique_job_id)
+
         except Exception as e:
-            print(f"⚠️ {site['name']} ವೆಬ್‌ಸೈಟ್ ತಾಂತ್ರಿಕವಾಗಿ ನಿಧಾನವಾಗಿದೆ (ಮುಂದಿನ ಸುತ್ತಿನಲ್ಲಿ ಪರೀಕ್ಷಿಸಲಾಗುವುದು).")
+            print(f"Error scraping {site['url']}: {e}")
 
-print("🚀 ಜಿಡಿಎಸ್ & ಗವರ್ನಮೆಂಟ್ ಜಾಬ್ ಅಲರ್ಟ್ ಬಾಟ್ 24/7 ಲೈವ್ ಆಗಿದೆ!")
+    # ಕಳುಹಿಸಿದ ಜಾಬ್‌ಗಳನ್ನು ಸೇವ್ ಮಾಡಿ
+    save_seen_jobs(seen_jobs)
 
-while True:
-    check_all_govt_websites()
-    print("\n⏳ ಮುಂದಿನ ಚೆಕಿಂಗ್ 1 ಗಂಟೆಯ ನಂತರ ನಡೆಯಲಿದೆ...\n")
-    time.sleep(3600)
+if __name__ == "__main__":
+    fetch_and_send_jobs()
