@@ -2,7 +2,9 @@ name: Govt Job Alert Bot
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    # ಪ್ರತಿ 1 ಗಂಟೆಗೆ ಒಮ್ಮೆ ತಾನಾಗಿಯೇ ರನ್ ಆಗಲು (Every 1 hour)
+    - cron: '0 * * * *'
+  # ಬೇಕಾದಾಗ ಮ್ಯಾನುವಲ್ ಆಗಿ Run ಬಟನ್ ಒತ್ತಿ ಚೆಕ್ ಮಾಡಲು
   workflow_dispatch:
 
 jobs:
@@ -25,3 +27,11 @@ jobs:
 
     - name: Run Python Bot
       run: python bot.py
+
+    - name: Save and Push seen jobs history
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add seen_jobs.json || true
+        git commit -m "Update seen jobs list" || true
+        git push || true
